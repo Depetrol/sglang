@@ -48,6 +48,7 @@ if __name__ == "__main__":
         model_path="openvla/openvla-7b",
         tokenizer_path="openvla/openvla-7b",
         disable_cuda_graph=True,
+        chat_template="openvla"
     )
     sgl.set_default_backend(runtime)
     print(f"chat template: {runtime.endpoint.chat_template.name}")

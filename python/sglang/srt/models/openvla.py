@@ -612,7 +612,7 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         image_offsets: Optional[List[int]] = None,
     ) -> Union[Tuple, PrismaticCausalLMOutputWithPast]:
         """Run a forward pass through the VLM, returning a PrismaticCausalLMOutputWithPast instance."""
-
+        print("input_ids", input_ids)
         # Instantiate Placeholder for Projector Features
         projected_patch_embeddings = None
 

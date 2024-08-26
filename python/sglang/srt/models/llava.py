@@ -359,7 +359,11 @@ class LlavaLlamaForCausalLM(nn.Module):
                         print(input_embeds.shape)
                         print(start_idx, image_offsets[i])
                     pt += 1
-
+            print("==== input_ids =====")
+            print(input_ids.shape)
+            print(input_ids)
+            print("===== input_embeds =====")
+            print(input_embeds.shape)
             return self.language_model(
                 input_ids, positions, input_metadata, input_embeds=input_embeds
             )

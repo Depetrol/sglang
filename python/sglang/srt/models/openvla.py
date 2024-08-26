@@ -650,8 +650,15 @@ class OpenVLAForActionPrediction(PreTrainedModel):
 
             # Dispatch to Language Model
             multimodal_embeddings = multimodal_embeddings.squeeze(0)
+            positions = torch.arange(1, multimodal_embeddings.shape[0]+1)
+            input_metadata.seq_lens = torch.tensor([multimodal_embeddings.shape[0]])
+            input_metadata.positions = positions
+            print("input_metadata", input_metadata)
+            print("input_ids", input_ids.shape)
+            print("multimodal_embeddings", multimodal_embeddings.shape)
+            print("positions", positions.shape)
             language_model_output = self.language_model(
-                input_ids=input_ids,
+                input_ids=None,
                 positions=positions,
                 input_metadata=input_metadata,
                 input_embeds=multimodal_embeddings,
@@ -671,7 +678,7 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             input_ids = torch.cat(
                 (input_ids, torch.unsqueeze(torch.Tensor([29871]).long(), dim=0).to(input_ids.device)), dim=1
             )
-
+        print(kwargs)
         # Run VLA inference
         generated_ids = self.generate(input_ids, max_new_tokens=self.get_action_dim(unnorm_key), **kwargs)
         # generated_ids = self.generate(input_ids, max_new_tokens=7, **kwargs)

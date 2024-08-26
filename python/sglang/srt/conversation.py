@@ -441,6 +441,18 @@ register_conv_template(
 
 register_conv_template(
     Conversation(
+        name="openvla",
+        system_template="[INST] <<SYS>>\n{system_message}\n<</SYS>>\n\n",
+        roles=("[INST]", "[/INST]"),
+        sep_style=SeparatorStyle.LLAMA2,
+        sep=" ",
+        sep2=" </s><s>",
+        stop_str=["[INST]", "[/INST]", "<<SYS>>", "<</SYS>>"],
+    )
+)
+
+register_conv_template(
+    Conversation(
         name="chatml",
         system_template="<|im_start|>system\n{system_message}",
         system_message="You are a helpful assistant.",

@@ -29,6 +29,7 @@ import uvloop
 import zmq
 import zmq.asyncio
 from fastapi import BackgroundTasks
+import torch
 
 from sglang.srt.hf_transformers_utils import (
     get_config,
@@ -221,6 +222,7 @@ class TokenizerManager:
 
             rid = obj.rid if not_use_index else obj.rid[index]
             input_text = obj.text if not_use_index else obj.text[index]
+            print("input_text", input_text)
             if obj.input_ids is None:
                 assert self.tokenizer is not None
                 input_ids = self.tokenizer.encode(input_text)

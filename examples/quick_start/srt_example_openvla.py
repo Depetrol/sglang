@@ -13,7 +13,7 @@ def image_qa(s, image_path, question):
 
 def single():
     state = image_qa.run(
-        image_path="images/robot.jpg", question="In: What action should the robot take to {<INSTRUCTION>}?\nOut:", max_new_tokens=128
+        image_path="images/robot.jpg", question="In: What action should the robot take to {<INSTRUCTION>}?\nOut:", max_new_tokens=7
     )
     print(state["answer"], "\n")
 
@@ -47,7 +47,8 @@ if __name__ == "__main__":
     runtime = sgl.Runtime(
         model_path="openvla/openvla-7b",
         tokenizer_path="openvla/openvla-7b",
-        disable_cuda_graph=True
+        disable_cuda_graph=True,
+        multimodal_config=None
     )
     sgl.set_default_backend(runtime)
     print(f"chat template: {runtime.endpoint.chat_template.name}")

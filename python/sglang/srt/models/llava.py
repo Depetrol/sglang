@@ -65,7 +65,6 @@ class LlavaLlamaForCausalLM(nn.Module):
             self.language_model.model.image_newline = nn.Parameter(
                 torch.empty(config.text_config.hidden_size, dtype=torch.float16)
             )
-        print("===== Using LlavaLlamaForCausalLM =====")
 
     def pad_input_ids(self, input_ids, pad_value, pt_shape=None, image_size=None):
 

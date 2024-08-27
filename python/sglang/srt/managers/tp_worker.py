@@ -333,6 +333,8 @@ class ModelTpServer:
                     (image_hash >> 32) % self.model_config.vocab_size,
                     (image_hash >> 64) % self.model_config.vocab_size,
                 ]
+                if "openvla" in self.model_config.path:
+                    req.pad_value = 2
                 req.image_size = recv_req.image_size
                 (
                     req.origin_input_ids,
@@ -343,6 +345,11 @@ class ModelTpServer:
                     req.pixel_values.shape,
                     req.image_size,
                 )
+                if "openvla" in self.model_config.path:
+                    req.image_size = len(req.origin_input_ids) - len(
+                        req.origin_input_ids_unpadded
+                    )
+
             req.return_logprob = recv_req.return_logprob
             req.logprob_start_len = recv_req.logprob_start_len
             req.top_logprobs_num = recv_req.top_logprobs_num

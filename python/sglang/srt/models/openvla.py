@@ -205,8 +205,12 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             self.config.text_config.vocab_size - self.config.pad_to_multiple_of
         )
 
-    def pad_input_ids(self, input_ids, pad_value, pt_shape=None, image_size=None):
-        return input_ids, [0]
+    def pad_input_ids(
+        self, input_ids, pad_value, pt_shape=None, image_size=None, multiple_of=64
+    ):
+        image_pad_len = ((pt_shape[-1] - 1) // multiple_of + 1) * multiple_of
+        input_ids = input_ids[:1] + [pad_value] * image_pad_len + input_ids[1:]
+        return input_ids, 1
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         return None
@@ -246,15 +250,16 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         # Instantiate Placeholder for Projector Features
         projected_patch_embeddings = None
 
-        if pixel_values is not None:
-            pixel_values = pixel_values[0]
+        need_vision = pixel_values is not None and any(
+            p is not None for p in pixel_values
+        )
 
         # === Handle Unimodal Forward ===
-        if pixel_values is None:
+        if not need_vision:
             assert (
                 input_ids is not None
             ), "Missing `input_ids` in language-only forward!"
-            language_model_output = self.language_model(
+            return self.language_model(
                 input_ids=input_ids,
                 positions=positions,
                 input_metadata=input_metadata,
@@ -262,41 +267,26 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             )
 
         # === Handle Multimodal Forward ===
-        else:
-            # Visual Feature Extraction
-            patch_features = self.vision_backbone(pixel_values)
+        embedding_layer = self.language_model.model.embed_tokens
+        input_embeddings = embedding_layer(input_ids)
 
-            # Projection Logic =>> Update Attention Mask
+        pt = 0
+        for i, p_v in enumerate(pixel_values):
+            image_offset = image_offsets[i]
+            image_size = image_sizes[i]
+            patch_features = self.vision_backbone(p_v)
             projected_patch_embeddings = self.projector(patch_features)
-
-            # Get Input Embeddings (from Language Model Embeddings)
-            embedding_layer = self.language_model.model.embed_tokens
-            input_embeddings = embedding_layer(input_ids.unsqueeze(0))
-
-            # Build Multimodal Embeddings & Attention Mask =>> Prismatic defaults to inserting after <BOS> token (1:)
-            multimodal_embeddings = torch.cat(
-                [
-                    input_embeddings[:, :1, :],
-                    projected_patch_embeddings,
-                    input_embeddings[:, 1:, :],
-                ],
-                dim=1,
+            input_embeddings[pt + image_offset : pt + image_offset + image_size] = (
+                projected_patch_embeddings
             )
+            pt += input_metadata.extend_seq_lens_cpu[i]
 
-            # Dispatch to Language Model
-            multimodal_embeddings = multimodal_embeddings.squeeze(0)
-            positions = torch.arange(1, multimodal_embeddings.shape[0] + 1)
-            input_metadata.seq_lens = torch.tensor([multimodal_embeddings.shape[0]])
-            input_metadata.positions = positions
-            language_model_output = self.language_model(
-                input_ids=None,
-                positions=positions,
-                input_metadata=input_metadata,
-                input_embeds=multimodal_embeddings,
-            )
-
-        # language_model_output.next_token_logits = language_model_output.logits
-        return language_model_output
+        return self.language_model(
+            input_ids=None,
+            positions=positions,
+            input_metadata=input_metadata,
+            input_embeds=input_embeddings,
+        )
 
     def predict_action(
         self,

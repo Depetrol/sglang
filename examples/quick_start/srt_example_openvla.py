@@ -50,6 +50,7 @@ if __name__ == "__main__":
         model_path="openvla/openvla-7b",
         tokenizer_path="openvla/openvla-7b",
         disable_cuda_graph=True,
+        disable_radix_cache=True,
     )
     sgl.set_default_backend(runtime)
     print(f"chat template: {runtime.endpoint.chat_template.name}")
@@ -70,4 +71,4 @@ if __name__ == "__main__":
     # print("\n========== batch ==========\n")
     # batch()
 
-    # runtime.shutdown()
+    runtime.shutdown()

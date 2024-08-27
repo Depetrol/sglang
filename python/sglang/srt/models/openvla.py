@@ -379,16 +379,6 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
 
-    # def forward(
-    #     self,
-    #     input_ids: torch.LongTensor,
-    #     positions: torch.Tensor,
-    #     input_metadata: InputMetadata,
-    #     pixel_values: Optional[List[Optional[np.array]]] = None,
-    #     image_sizes: Optional[List[List[int]]] = None,
-    #     image_offsets: Optional[List[int]] = None,
-    # ) -> torch.Tensor:
-
     def forward(
         self,
         input_ids: torch.LongTensor,
@@ -429,8 +419,8 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             projected_patch_embeddings = self.projector(patch_features)
 
             # Get Input Embeddings (from Language Model Embeddings)
-            input_embeddings = self.get_input_embeddings()(input_ids.unsqueeze(0))
-            # input_embeddings = input_embeddings.unsqueeze(0)
+            embedding_layer = self.language_model.model.embed_tokens
+            input_embeddings = embedding_layer(input_ids.unsqueeze(0))
 
             # Build Multimodal Embeddings & Attention Mask =>> Prismatic defaults to inserting after <BOS> token (1:)
             multimodal_embeddings = torch.cat(
@@ -553,18 +543,6 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         """Get all the logged statistics for the given dataset."""
         unnorm_key = self._check_unnorm_key(self.norm_stats, unnorm_key)
         return self.norm_stats[unnorm_key]["action"]
-
-    # === `PreTrainedModel` Boilerplate ===
-    def get_input_embeddings(self) -> nn.Module:
-        # print("===== Get Input Embeeding =====")
-        # torch.save(self.language_model.get_input_embeddings(), "weights/embedding_layer.pt")
-        if self.embeddings_layer == None:
-            self.embeddings_layer = torch.load(
-                "weights/embedding_layer.pt", weights_only=False
-            ).to("cuda")
-        # print(torch.equal(embeddings_layer.to('cpu').weight, self.language_model.get_input_embeddings().to('cpu').weight))
-        return self.embeddings_layer
-        # return self.language_model.get_input_embeddings()
 
     def tie_weights(self) -> None:
         print("===== Tie Weights =====")

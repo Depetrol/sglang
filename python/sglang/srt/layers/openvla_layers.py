@@ -379,11 +379,6 @@ class PrismaticVisionBackbone(nn.Module):
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """Run image (`pixel_values`) through featurizer; if channel-stacked, then dispatch and sequence stack."""
-        print("===== pixel values =====")
-        print(type(pixel_values))
-        pixel_values = (
-            torch.from_numpy(pixel_values).unsqueeze(0).to(torch.bfloat16).to("cuda")
-        )
         if not self.use_fused_vision_backbone:
             return self.featurizer(pixel_values)
 

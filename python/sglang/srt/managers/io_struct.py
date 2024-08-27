@@ -35,6 +35,8 @@ class GenerateReqInput:
     # The image input. It can be a file name, a url, or base64 encoded string.
     # See also python/sglang/srt/utils.py:load_image.
     image_data: Optional[Union[List[str], str]] = None
+    # Image Path
+    image_path: Optional[Union[List[str], str]] = None
     # The sampling_params. See descriptions below.
     sampling_params: Union[List[Dict], Dict] = None
     # The request id.
@@ -123,6 +125,11 @@ class GenerateReqInput:
                 self.image_data = [None] * num
             elif not isinstance(self.image_data, list):
                 self.image_data = [self.image_data] * num
+
+            if self.image_path is None:
+                self.image_path = [None] * num
+            elif not isinstance(self.image_path, list):
+                self.image_path = [self.image_path] * num
 
             if self.sampling_params is None:
                 self.sampling_params = [{}] * num

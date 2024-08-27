@@ -24,6 +24,7 @@ import os
 from typing import Dict, List, Tuple, Union
 
 import numpy as np
+import torch
 import transformers
 import uvloop
 import zmq
@@ -191,6 +192,31 @@ class TokenizerManager:
                 image_data, aspect_ratio, grid_pinpoints, self.processor
             )
 
+    async def get_pixel_values_openvla(self, prompt, image_path):
+        import requests
+        from PIL import Image
+
+        from sglang.srt.layers.openvla_layers import PrismaticProcessor
+
+        # load image from url
+        if image_path.startswith("http"):
+            image = Image.open(requests.get(image_path, stream=True).raw)
+        else:
+            image = Image.open(image_path)
+
+        image = image.resize((224, 224))
+
+        if not hasattr(self, "openvla_processor"):
+            self.openvla_processor = PrismaticProcessor.from_pretrained(
+                self.model_path, trust_remote_code=True
+            )
+
+        inputs = self.openvla_processor(prompt, image)
+        input_ids = inputs["input_ids"].tolist()
+        pixel_value = inputs["pixel_values"].to(torch.bfloat16).to(0)
+
+        return input_ids, pixel_value, 224, 224
+
     async def generate_request(
         self, obj: Union[GenerateReqInput, EmbeddingReqInput], request=None
     ):
@@ -236,9 +262,14 @@ class TokenizerManager:
             )
 
             if self.is_generation:
-                pixel_values, image_hash, image_size = await self.get_pixel_values(
-                    obj.image_data
-                )
+                if "openvla" in self.model_path and obj.image_data is not None:
+                    input_ids, pixel_values, image_hash, image_size = (
+                        await self.get_pixel_values_openvla(obj.text, obj.image_path)
+                    )
+                else:
+                    pixel_values, image_hash, image_size = await self.get_pixel_values(
+                        obj.image_data
+                    )
                 return_logprob = (
                     obj.return_logprob if not_use_index else obj.return_logprob[index]
                 )

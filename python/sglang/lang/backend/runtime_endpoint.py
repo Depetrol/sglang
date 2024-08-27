@@ -294,6 +294,7 @@ class RuntimeEndpoint(BaseBackend):
         if s.images_:
             assert len(s.images_) == 1, "Only support one image."
             data["image_data"] = s.images_[0][1]
+            data["image_path"] = s.images_[0][0]
 
     def _assert_success(self, res):
         if res.status_code != 200:

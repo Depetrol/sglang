@@ -1,18 +1,36 @@
-from typing import ClassVar, List, Optional, Tuple, Union, Any
-from transformers.image_processing_utils import BatchFeature, ImageProcessingMixin
+from functools import partial
+from typing import Any, Callable, ClassVar, List, Optional, Tuple, Union
+
+import timm
+import torch
 import torchvision.transforms.functional as TVF
 from PIL import Image
-import timm
+from timm.models.vision_transformer import LayerScale
+from torch import nn
 from torchvision.transforms import CenterCrop, Compose, Normalize, Resize, ToTensor
+from transformers import PreTrainedTokenizerBase
+from transformers.image_processing_utils import BatchFeature, ImageProcessingMixin
+from transformers.processing_utils import ProcessorMixin
+from transformers.tokenization_utils import (
+    PaddingStrategy,
+    PreTokenizedInput,
+    TextInput,
+    TruncationStrategy,
+)
+from transformers.utils import TensorType
+
 
 # === Image Processing ===
-def letterbox_pad_transform(image: Image.Image, padding_fill_value: Tuple[int, int, int]) -> Image.Image:
+def letterbox_pad_transform(
+    image: Image.Image, padding_fill_value: Tuple[int, int, int]
+) -> Image.Image:
     """Given a PIL.Image, pad to square by adding a symmetric border around the height/width."""
     (w, h), max_wh = image.size, max(image.size)
     horizontal_pad, vertical_pad = int((max_wh - w) / 2), int((max_wh - h) / 2)
     padding = (horizontal_pad, vertical_pad, horizontal_pad, vertical_pad)
 
     return TVF.pad(image, padding, fill=padding_fill_value, padding_mode="constant")
+
 
 class PrismaticImageProcessor(ImageProcessingMixin):
     model_input_names: ClassVar[List[str]] = ["pixel_values"]
@@ -46,10 +64,19 @@ class PrismaticImageProcessor(ImageProcessingMixin):
         stds = [(0.5, 0.5, 0.5)] if stds is None else stds
 
         # TIMM `data_cfg` Parameters
-        self.input_sizes, self.interpolations, self.means, self.stds = input_sizes, interpolations, means, stds
+        self.input_sizes, self.interpolations, self.means, self.stds = (
+            input_sizes,
+            interpolations,
+            means,
+            stds,
+        )
 
         # Grab torchvision transforms via TIMM =>> need to parse for specific "functional" transform values!
-        self.tvf_resize_params, self.tvf_crop_params, self.tvf_normalize_params = [], [], []
+        self.tvf_resize_params, self.tvf_crop_params, self.tvf_normalize_params = (
+            [],
+            [],
+            [],
+        )
         self.tvf_do_letterbox, self.tvf_letterbox_fill = False, None
 
         for idx in range(len(input_sizes)):
@@ -74,11 +101,17 @@ class PrismaticImageProcessor(ImageProcessingMixin):
                 and (transform.transforms[0].size == self.input_sizes[idx][-1])
                 and (transform.transforms[1].size == self.input_sizes[idx][-2:])
             ):
-                raise ValueError(f"Unexpected TIMM image transformation structure/sizes: `{transform}`")
+                raise ValueError(
+                    f"Unexpected TIMM image transformation structure/sizes: `{transform}`"
+                )
 
             # HF Image Processors *must* be JSON-serializable; as such, cannot have torchvision. as an attribute.
             #   => Instead, we're going to parse the transform and call "torchvision.transforms.functional" (`tvf`)
-            resize_t, crop_t, norm_t = transform.transforms[0], transform.transforms[1], transform.transforms[3]
+            resize_t, crop_t, norm_t = (
+                transform.transforms[0],
+                transform.transforms[1],
+                transform.transforms[3],
+            )
             self.tvf_resize_params.append(
                 {
                     "size": resize_t.size,
@@ -101,11 +134,15 @@ class PrismaticImageProcessor(ImageProcessingMixin):
             if self.image_resize_strategy == "resize-naive":
                 self.tvf_resize_params[idx]["size"] = (resize_t.size, resize_t.size)
             elif self.image_resize_strategy == "letterbox":
-                self.tvf_do_letterbox, self.tvf_letterbox_fill = True, tuple([int(x * 255) for x in self.means[idx]])
+                self.tvf_do_letterbox, self.tvf_letterbox_fill = True, tuple(
+                    [int(x * 255) for x in self.means[idx]]
+                )
             elif self.image_resize_strategy == "resize-crop":
                 pass
             else:
-                raise ValueError(f"Image resize strategy `{self.image_resize_strategy}` is not supported!")
+                raise ValueError(
+                    f"Image resize strategy `{self.image_resize_strategy}` is not supported!"
+                )
 
         # Dispatch **kwargs to super()
         super().__init__(**kwargs)
@@ -146,12 +183,19 @@ class PrismaticImageProcessor(ImageProcessingMixin):
             images = [images]
 
         # Apply `self.img_transform` to each image (will return list of torch.Tensors); stack into "batched" Tensor
-        pixel_values = torch.stack([self.apply_transform(img.convert("RGB")) for img in images])
+        pixel_values = torch.stack(
+            [self.apply_transform(img.convert("RGB")) for img in images]
+        )
 
         # Return BatchFeature =>> note that for compatibility, constructor expects Dict[str, np.ndarray], so we convert
-        return BatchFeature(data={"pixel_values": pixel_values.float().numpy()}, tensor_type=return_tensors)
+        return BatchFeature(
+            data={"pixel_values": pixel_values.float().numpy()},
+            tensor_type=return_tensors,
+        )
 
-    def __call__(self, images: Union[Image.Image, List[Image.Image]], **kwargs) -> BatchFeature:
+    def __call__(
+        self, images: Union[Image.Image, List[Image.Image]], **kwargs
+    ) -> BatchFeature:
         return self.preprocess(images, **kwargs)
 
 
@@ -171,7 +215,9 @@ class PrismaticProcessor(ProcessorMixin):
 
     def __call__(
         self,
-        text: Union[TextInput, PreTokenizedInput, List[TextInput], List[PreTokenizedInput]],
+        text: Union[
+            TextInput, PreTokenizedInput, List[TextInput], List[PreTokenizedInput]
+        ],
         images: Union[Image.Image, List[Image.Image]],
         padding: Union[bool, str, PaddingStrategy] = False,
         truncation: Optional[Union[bool, str, TruncationStrategy]] = None,
@@ -189,21 +235,31 @@ class PrismaticProcessor(ProcessorMixin):
         @param return_tensors: Type of return tensors (usually "pt" or TensorType.PYTORCH)
         @return: BatchFeature with keys for `input_ids`, `attention_mask` and `pixel_values`.
         """
-        pixel_values = self.image_processor(images, return_tensors=return_tensors)["pixel_values"]
+        pixel_values = self.image_processor(images, return_tensors=return_tensors)[
+            "pixel_values"
+        ]
         text_inputs = self.tokenizer(
-            text, return_tensors=return_tensors, padding=padding, truncation=truncation, max_length=max_length
+            text,
+            return_tensors=return_tensors,
+            padding=padding,
+            truncation=truncation,
+            max_length=max_length,
         )
 
         # [Validate] Need same number of images and text inputs!
         if pixel_values.shape[0] != text_inputs.input_ids.shape[0]:
-            raise ValueError("Batch is malformed; expected same number of images and text inputs!")
+            raise ValueError(
+                "Batch is malformed; expected same number of images and text inputs!"
+            )
 
         return BatchFeature(data={**text_inputs, "pixel_values": pixel_values})
 
     # === Tokenizer Dispatch Utilities =>> check `PreTrainedTokenizerBase` for documentation ===
     def batch_decode(
         self,
-        sequences: Union[List[int], List[List[int]], torch.Tensor, Any],  # `Any` = np.ndarray | tf.Tensor
+        sequences: Union[
+            List[int], List[List[int]], torch.Tensor, Any
+        ],  # `Any` = np.ndarray | tf.Tensor
         skip_special_tokens: bool = False,
         clean_up_tokenization_spaces: Optional[bool] = None,
         **kwargs: str,
@@ -217,7 +273,9 @@ class PrismaticProcessor(ProcessorMixin):
 
     def decode(
         self,
-        token_ids: Union[int, List[int], torch.Tensor, Any],  # `Any` = np.ndarray | tf.Tensor
+        token_ids: Union[
+            int, List[int], torch.Tensor, Any
+        ],  # `Any` = np.ndarray | tf.Tensor
         skip_special_tokens: bool = False,
         clean_up_tokenization_spaces: Optional[bool] = None,
         **kwargs: str,
@@ -236,3 +294,137 @@ class PrismaticProcessor(ProcessorMixin):
 
         return list(dict.fromkeys(tokenizer_input_names + image_processor_input_names))
 
+
+# === Utility Functions for Monkey-Patching ===
+def unpack_tuple(fn: Callable[[Any], Tuple[Any]]) -> Callable[[Any], Any]:
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        result = fn(*args, **kwargs)
+        return result[0] if isinstance(result, tuple) else result
+
+    return wrapper
+
+
+# HF Transformers overwrites parameters with names containing `gamma`; we're going to patch VisionBackbone.LayerScale.
+#   =>> TIMM :: https://github.com/huggingface/pytorch-image-models/blob/main/timm/models/vision_transformer.py#L109
+#   =>> Transformers :: https://github.com/huggingface/transformers/blob/main/src/transformers/modeling_utils.py#L3960
+def _ls_new_forward(self, x: torch.Tensor) -> torch.Tensor:
+    return x.mul_(self.scale_factor) if self.inplace else x * self.scale_factor
+
+
+def ls_apply_patch(ls_module: LayerScale):
+    ls_module.scale_factor = nn.Parameter(ls_module.gamma.clone())
+    ls_module.forward = _ls_new_forward.__get__(ls_module, LayerScale)
+    del ls_module.gamma
+
+
+# === Prismatic Vision Backbone (nn.Module) Definitions (w/ Fused Backbone Support) ===
+class PrismaticVisionBackbone(nn.Module):
+    def __init__(
+        self,
+        use_fused_vision_backbone: bool,
+        image_sizes: List[int],
+        timm_model_ids: List[str],
+        timm_override_act_layers: List[Optional[str]],
+    ) -> None:
+        super().__init__()
+        self.use_fused_vision_backbone = use_fused_vision_backbone
+
+        # [Contract] Validate number of (fused) vision backbones, create "alpha" featurizer and Instantiate
+        #   =>> Note :: Monkey-Patch the `forward()` function of the backbone to ensure FSDP-compatibility
+        #               Hardcodes `get_intermediate_layers` to return the **SECOND-TO-LAST** layer patches!
+        assert (
+            len(timm_model_ids) <= 2
+        ), "Prismatic models only support up to 2 (fused) vision backbones!"
+        self.featurizer = timm.create_model(
+            timm_model_ids[0],
+            pretrained=False,
+            num_classes=0,
+            img_size=image_sizes[0],
+            act_layer=timm_override_act_layers[0],
+        )
+        self.featurizer.forward = unpack_tuple(
+            partial(
+                self.featurizer.get_intermediate_layers,
+                n={len(self.featurizer.blocks) - 2},
+            )
+        )
+        self.embed_dim = self.featurizer.embed_dim
+
+        # If `use_fused_vision_backbone` =>> create "beta" featurizer
+        if self.use_fused_vision_backbone:
+            self.fused_featurizer = timm.create_model(
+                timm_model_ids[1],
+                pretrained=False,
+                num_classes=0,
+                img_size=image_sizes[1],
+                act_layer=timm_override_act_layers[1],
+            )
+            self.fused_featurizer.forward = unpack_tuple(
+                partial(
+                    self.fused_featurizer.get_intermediate_layers,
+                    n={len(self.fused_featurizer.blocks) - 2},
+                )
+            )
+            self.embed_dim += self.fused_featurizer.embed_dim
+
+        # Patch `vision_backbone.featurizer` and `vision_backbone.fused_featurizer` with HF-Compatible LayerScale
+        for module in self.featurizer.modules():
+            if isinstance(module, LayerScale):
+                ls_apply_patch(module)
+
+        if self.use_fused_vision_backbone:
+            for module in self.fused_featurizer.modules():
+                if isinstance(module, LayerScale):
+                    ls_apply_patch(module)
+
+    def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
+        """Run image (`pixel_values`) through featurizer; if channel-stacked, then dispatch and sequence stack."""
+        print("===== pixel values =====")
+        print(type(pixel_values))
+        pixel_values = (
+            torch.from_numpy(pixel_values).unsqueeze(0).to(torch.bfloat16).to("cuda")
+        )
+        if not self.use_fused_vision_backbone:
+            return self.featurizer(pixel_values)
+
+        # Split `pixel_values :: [bsz, 2 * 3, resolution, resolution]` =>> featurize =>> channel stack
+        img, img_fused = torch.split(pixel_values, [3, 3], dim=1)
+        patches, patches_fused = self.featurizer(img), self.fused_featurizer(img_fused)
+
+        return torch.cat([patches, patches_fused], dim=2)
+
+
+class PrismaticProjector(nn.Module):
+    def __init__(
+        self, use_fused_vision_backbone: bool, vision_dim: int, llm_dim: int
+    ) -> None:
+        super().__init__()
+        self.use_fused_vision_backbone = use_fused_vision_backbone
+        self.vision_dim, self.llm_dim = vision_dim, llm_dim
+
+        # Switch on `use_fused_vision_backbone` =>> use slightly different MLPs and projection factors!
+        if not self.use_fused_vision_backbone:
+            self.fc1 = nn.Linear(self.vision_dim, self.llm_dim, bias=True)
+            self.fc2 = nn.Linear(self.llm_dim, self.llm_dim, bias=True)
+            self.act_fn1 = nn.GELU()
+        else:
+            initial_projection_dim = 4 * vision_dim
+            self.fc1 = nn.Linear(self.vision_dim, initial_projection_dim, bias=True)
+            self.fc2 = nn.Linear(initial_projection_dim, self.llm_dim, bias=True)
+            self.fc3 = nn.Linear(self.llm_dim, self.llm_dim, bias=True)
+            self.act_fn1 = nn.GELU()
+            self.act_fn2 = nn.GELU()
+
+    def forward(self, img_patches: torch.Tensor) -> torch.Tensor:
+        if not self.use_fused_vision_backbone:
+            projected_features = self.fc1(img_patches)
+            projected_features = self.act_fn1(projected_features)
+            projected_features = self.fc2(projected_features)
+        else:
+            projected_features = self.fc1(img_patches)
+            projected_features = self.act_fn1(projected_features)
+            projected_features = self.fc2(projected_features)
+            projected_features = self.act_fn2(projected_features)
+            projected_features = self.fc3(projected_features)
+
+        return projected_features

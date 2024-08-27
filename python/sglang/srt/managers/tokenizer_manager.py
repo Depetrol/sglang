@@ -29,7 +29,6 @@ import uvloop
 import zmq
 import zmq.asyncio
 from fastapi import BackgroundTasks
-import torch
 
 from sglang.srt.hf_transformers_utils import (
     get_config,
@@ -95,8 +94,9 @@ class TokenizerManager:
             trust_remote_code=server_args.trust_remote_code,
             model_overide_args=model_overide_args,
         )
-        if("OpenVLAForActionPrediction" in self.hf_config.architectures):
+        if "OpenVLAForActionPrediction" in self.hf_config.architectures:
             self.hf_config.image_aspect_ratio = "pad"
+
         self.is_generation = is_generation_model(self.hf_config.architectures)
 
         if server_args.context_length is not None:

@@ -1,33 +1,26 @@
-from typing import Iterable, List, Optional, Tuple, Any, Dict, ClassVar, Union
-
-import numpy as np
-import torch
-from torch import nn
-from transformers import PretrainedConfig
-from vllm.config import CacheConfig
-from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
-
-from sglang.srt.model_executor.forward_batch_info import InputMetadata
-from sglang.srt.models.llama2 import LlamaForCausalLM
-from transformers.models.auto import CONFIG_MAPPING
-
 import logging
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, ClassVar, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 import timm
+import timm.data
 import tokenizers
 import torch
 import torch.nn as nn
 import transformers
 from timm.models.vision_transformer import LayerScale
+from torch import nn
 from transformers import PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import ModelOutput
+from transformers.models.auto import CONFIG_MAPPING
+from vllm.config import CacheConfig
+from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
 
-import timm.data
-import torch
+from sglang.srt.layers.openvla_layers import PrismaticProjector, PrismaticVisionBackbone
+from sglang.srt.model_executor.forward_batch_info import InputMetadata
+from sglang.srt.models.llama2 import LlamaForCausalLM
 
 TIMM_OVERRIDE_ACT_LAYER: Dict[str, List[Optional[str]]] = {
     "clip-vit-l": ["quick_gelu"],
@@ -49,141 +42,6 @@ logger = logging.getLogger(__name__)
 
 # === PyTorch/HuggingFace Default IGNORE_INDEX (for CrossEntropyLoss labels)
 IGNORE_INDEX = -100
-
-
-# === Utility Functions for Monkey-Patching ===
-def unpack_tuple(fn: Callable[[Any], Tuple[Any]]) -> Callable[[Any], Any]:
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        result = fn(*args, **kwargs)
-        return result[0] if isinstance(result, tuple) else result
-
-    return wrapper
-
-
-# HF Transformers overwrites parameters with names containing `gamma`; we're going to patch VisionBackbone.LayerScale.
-#   =>> TIMM :: https://github.com/huggingface/pytorch-image-models/blob/main/timm/models/vision_transformer.py#L109
-#   =>> Transformers :: https://github.com/huggingface/transformers/blob/main/src/transformers/modeling_utils.py#L3960
-def _ls_new_forward(self, x: torch.Tensor) -> torch.Tensor:
-    return x.mul_(self.scale_factor) if self.inplace else x * self.scale_factor
-
-
-def ls_apply_patch(ls_module: LayerScale):
-    ls_module.scale_factor = nn.Parameter(ls_module.gamma.clone())
-    ls_module.forward = _ls_new_forward.__get__(ls_module, LayerScale)
-    del ls_module.gamma
-
-
-# === Prismatic Vision Backbone (nn.Module) Definitions (w/ Fused Backbone Support) ===
-class PrismaticVisionBackbone(nn.Module):
-    def __init__(
-        self,
-        use_fused_vision_backbone: bool,
-        image_sizes: List[int],
-        timm_model_ids: List[str],
-        timm_override_act_layers: List[Optional[str]],
-    ) -> None:
-        super().__init__()
-        self.use_fused_vision_backbone = use_fused_vision_backbone
-
-        # [Contract] Validate number of (fused) vision backbones, create "alpha" featurizer and Instantiate
-        #   =>> Note :: Monkey-Patch the `forward()` function of the backbone to ensure FSDP-compatibility
-        #               Hardcodes `get_intermediate_layers` to return the **SECOND-TO-LAST** layer patches!
-        assert (
-            len(timm_model_ids) <= 2
-        ), "Prismatic models only support up to 2 (fused) vision backbones!"
-        self.featurizer = timm.create_model(
-            timm_model_ids[0],
-            pretrained=False,
-            num_classes=0,
-            img_size=image_sizes[0],
-            act_layer=timm_override_act_layers[0],
-        )
-        self.featurizer.forward = unpack_tuple(
-            partial(
-                self.featurizer.get_intermediate_layers,
-                n={len(self.featurizer.blocks) - 2},
-            )
-        )
-        self.embed_dim = self.featurizer.embed_dim
-
-        # If `use_fused_vision_backbone` =>> create "beta" featurizer
-        if self.use_fused_vision_backbone:
-            self.fused_featurizer = timm.create_model(
-                timm_model_ids[1],
-                pretrained=False,
-                num_classes=0,
-                img_size=image_sizes[1],
-                act_layer=timm_override_act_layers[1],
-            )
-            self.fused_featurizer.forward = unpack_tuple(
-                partial(
-                    self.fused_featurizer.get_intermediate_layers,
-                    n={len(self.fused_featurizer.blocks) - 2},
-                )
-            )
-            self.embed_dim += self.fused_featurizer.embed_dim
-
-        # Patch `vision_backbone.featurizer` and `vision_backbone.fused_featurizer` with HF-Compatible LayerScale
-        for module in self.featurizer.modules():
-            if isinstance(module, LayerScale):
-                ls_apply_patch(module)
-
-        if self.use_fused_vision_backbone:
-            for module in self.fused_featurizer.modules():
-                if isinstance(module, LayerScale):
-                    ls_apply_patch(module)
-
-    def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        """Run image (`pixel_values`) through featurizer; if channel-stacked, then dispatch and sequence stack."""
-        print("===== pixel values =====")
-        print(type(pixel_values))
-        pixel_values = (
-            torch.from_numpy(pixel_values).unsqueeze(0).to(torch.bfloat16).to("cuda")
-        )
-        if not self.use_fused_vision_backbone:
-            return self.featurizer(pixel_values)
-
-        # Split `pixel_values :: [bsz, 2 * 3, resolution, resolution]` =>> featurize =>> channel stack
-        img, img_fused = torch.split(pixel_values, [3, 3], dim=1)
-        patches, patches_fused = self.featurizer(img), self.fused_featurizer(img_fused)
-
-        return torch.cat([patches, patches_fused], dim=2)
-
-
-class PrismaticProjector(nn.Module):
-    def __init__(
-        self, use_fused_vision_backbone: bool, vision_dim: int, llm_dim: int
-    ) -> None:
-        super().__init__()
-        self.use_fused_vision_backbone = use_fused_vision_backbone
-        self.vision_dim, self.llm_dim = vision_dim, llm_dim
-
-        # Switch on `use_fused_vision_backbone` =>> use slightly different MLPs and projection factors!
-        if not self.use_fused_vision_backbone:
-            self.fc1 = nn.Linear(self.vision_dim, self.llm_dim, bias=True)
-            self.fc2 = nn.Linear(self.llm_dim, self.llm_dim, bias=True)
-            self.act_fn1 = nn.GELU()
-        else:
-            initial_projection_dim = 4 * vision_dim
-            self.fc1 = nn.Linear(self.vision_dim, initial_projection_dim, bias=True)
-            self.fc2 = nn.Linear(initial_projection_dim, self.llm_dim, bias=True)
-            self.fc3 = nn.Linear(self.llm_dim, self.llm_dim, bias=True)
-            self.act_fn1 = nn.GELU()
-            self.act_fn2 = nn.GELU()
-
-    def forward(self, img_patches: torch.Tensor) -> torch.Tensor:
-        if not self.use_fused_vision_backbone:
-            projected_features = self.fc1(img_patches)
-            projected_features = self.act_fn1(projected_features)
-            projected_features = self.fc2(projected_features)
-        else:
-            projected_features = self.fc1(img_patches)
-            projected_features = self.act_fn1(projected_features)
-            projected_features = self.fc2(projected_features)
-            projected_features = self.act_fn2(projected_features)
-            projected_features = self.fc3(projected_features)
-
-        return projected_features
 
 
 # === Main HF Class Definitions ===
@@ -437,10 +295,6 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             positions = torch.arange(1, multimodal_embeddings.shape[0] + 1)
             input_metadata.seq_lens = torch.tensor([multimodal_embeddings.shape[0]])
             input_metadata.positions = positions
-            print("input_metadata", input_metadata)
-            print("input_ids", input_ids.shape)
-            print("multimodal_embeddings", multimodal_embeddings.shape)
-            print("positions", positions.shape)
             language_model_output = self.language_model(
                 input_ids=None,
                 positions=positions,
@@ -548,5 +402,6 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         print("===== Tie Weights =====")
         return
         # self.language_model.tie_weights()  # Note: `Llama-2` and `Mistral` don't tie weights (no-op)
+
 
 EntryClass = OpenVLAForActionPrediction

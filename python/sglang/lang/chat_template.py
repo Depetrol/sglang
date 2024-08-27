@@ -81,11 +81,10 @@ register_chat_template(
         name="default",
         default_system_prompt=None,
         role_prefix_and_suffix={
-            "system": ("", ""),
-            "user": ("", ""),
-            "assistant": ("", ""),
+            "system": ("SYSTEM:", "\n"),
+            "user": ("USER:", "\n"),
+            "assistant": ("ASSISTANT:", "\n"),
         },
-        image_token="",
     )
 )
 
@@ -114,21 +113,6 @@ register_chat_template(
         },
         style=ChatTemplateStyle.PLAIN,
         stop_str=("<|im_end|>",),
-    )
-)
-
-register_chat_template(
-    ChatTemplate(
-        name="openvla",
-        default_system_prompt=None,
-        role_prefix_and_suffix={
-            "system": ("", ""),
-            "user": ("", ""),
-            "assistant": ("", ""),
-        },
-        style=ChatTemplateStyle.PLAIN,
-        # stop_str=("<|im_end|>",),
-        image_token="",
     )
 )
 

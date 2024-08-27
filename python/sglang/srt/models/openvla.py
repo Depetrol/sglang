@@ -282,7 +282,7 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             [input_embeddings[:, :1, :], projected_patch_embeddings, input_embeddings[:, 1:, :]], dim=1
         )
         multimodal_embeddings = multimodal_embeddings.squeeze(0)
-        print("multimodal_embeddings", multimodal_embeddings)
+        # print("multimodal_embeddings", multimodal_embeddings)
         return self.language_model(
             input_ids=None,
             positions=positions,

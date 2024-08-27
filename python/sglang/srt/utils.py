@@ -213,12 +213,20 @@ def is_multimodal_model(model):
 
     if isinstance(model, str):
         model = model.lower()
-        return "openvla" in model or "llava" in model or "yi-vl" in model or "llava-next" in model
+        return (
+            "openvla" in model
+            or "llava" in model
+            or "yi-vl" in model
+            or "llava-next" in model
+        )
 
     if isinstance(model, ModelConfig):
         model_path = model.path.lower()
         return (
-            "openvla" in model_path or "llava" in model_path or "yi-vl" in model_path or "llava-next" in model_path
+            "openvla" in model_path
+            or "llava" in model_path
+            or "yi-vl" in model_path
+            or "llava-next" in model_path
         )
 
     raise ValueError("unrecognized type")

@@ -57,7 +57,7 @@ class ModelConfig:
             self.hf_config.num_attention_heads = 32
             self.hf_config.num_hidden_layers = 32
             self.hf_config.vocab_size = 32064
-        
+
         self.head_dim = getattr(
             self.hf_config,
             "head_dim",

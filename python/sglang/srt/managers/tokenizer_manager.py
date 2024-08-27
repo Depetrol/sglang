@@ -212,7 +212,7 @@ class TokenizerManager:
             )
 
         inputs = self.openvla_processor(prompt, image)
-        input_ids = inputs["input_ids"].tolist()
+        input_ids = inputs["input_ids"].tolist()[0]
         pixel_value = inputs["pixel_values"].to(torch.bfloat16).to(0)
 
         return input_ids, pixel_value, 224, 224

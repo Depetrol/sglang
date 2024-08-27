@@ -7,8 +7,8 @@ import sglang as sgl
 
 @sgl.function
 def image_qa(s, image_path, question):
-    s += sgl.user(sgl.image(image_path) + question)
-    s += sgl.assistant(sgl.gen("answer"))
+    s += sgl.image(image_path) + question
+    s += sgl.gen("answer")
 
 
 def single():

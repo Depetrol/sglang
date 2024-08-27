@@ -471,7 +471,7 @@ class OpenVLAForActionPrediction(PreTrainedModel):
                 ),
                 dim=1,
             )
-        print(kwargs)
+
         # Run VLA inference
         generated_ids = self.generate(
             input_ids, max_new_tokens=self.get_action_dim(unnorm_key), **kwargs
@@ -548,46 +548,5 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         print("===== Tie Weights =====")
         return
         # self.language_model.tie_weights()  # Note: `Llama-2` and `Mistral` don't tie weights (no-op)
-
-    # === GenerationMixin Methods ===
-    def prepare_inputs_for_generation(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        pixel_values: Optional[torch.FloatTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        **kwargs: str,
-    ) -> Dict[str, torch.Tensor]:
-        """Borrowed from `LlamaForCausalLM` and simplified for batch size = 1; mirrors original PrismaticVLM logic."""
-        if ((input_ids is not None) and (input_ids.shape[0] > 1)) or (
-            (inputs_embeds is not None) and (inputs_embeds.shape[0] > 1)
-        ):
-            raise ValueError(
-                "Generation with batch size > 1 is not currently supported!"
-            )
-
-        # Handle `past_key_values` (cache) =>> assume `input_ids` just has unprocessed tokens
-        if past_key_values is not None:
-            input_ids = input_ids[:, -1:]
-
-        # If `input_embeds` are passed, we only want to use them in the 1st generation step
-        if inputs_embeds is not None and past_key_values is None:
-            model_inputs = {"input_embeds": inputs_embeds}
-        else:
-            model_inputs = {"input_ids": input_ids}
-
-        # Make sure `pixel_values` are preserved in `model_inputs`
-        model_inputs.update(
-            {
-                "attention_mask": attention_mask,
-                "pixel_values": pixel_values,
-                "past_key_values": past_key_values,
-                "use_cache": kwargs.get("use_cache"),
-            }
-        )
-
-        return model_inputs
-
 
 EntryClass = OpenVLAForActionPrediction

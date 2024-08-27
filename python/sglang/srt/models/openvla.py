@@ -210,6 +210,9 @@ class OpenVLAForActionPrediction(PreTrainedModel):
     ):
         image_pad_len = ((pt_shape[-1] - 1) // multiple_of + 1) * multiple_of
         input_ids = input_ids[:1] + [pad_value] * image_pad_len + input_ids[1:]
+        if input_ids[-1] != 29871:
+            input_ids.append(29871)
+
         return input_ids, 1
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
@@ -267,26 +270,30 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             )
 
         # === Handle Multimodal Forward ===
-        embedding_layer = self.language_model.model.embed_tokens
-        input_embeddings = embedding_layer(input_ids)
+        # embedding_layer = self.language_model.model.embed_tokens 
+        unpadded_input_ids = input_ids[input_ids != -1].unsqueeze(0)
+        embedding_layer = self.get_embedding_layer_from_file()
+        input_embeddings = embedding_layer(unpadded_input_ids)
+        assert(len(pixel_values) ==1, "OpenVLA only supports one pixel values as input")
 
-        pt = 0
-        for i, p_v in enumerate(pixel_values):
-            image_offset = image_offsets[i]
-            image_size = image_sizes[i]
-            patch_features = self.vision_backbone(p_v)
-            projected_patch_embeddings = self.projector(patch_features)
-            input_embeddings[pt + image_offset : pt + image_offset + image_size] = (
-                projected_patch_embeddings
-            )
-            pt += input_metadata.extend_seq_lens_cpu[i]
-
+        patch_features = self.vision_backbone(pixel_values[0])
+        projected_patch_embeddings = self.projector(patch_features)
+        multimodal_embeddings = torch.cat(
+            [input_embeddings[:, :1, :], projected_patch_embeddings, input_embeddings[:, 1:, :]], dim=1
+        )
+        multimodal_embeddings = multimodal_embeddings.squeeze(0)
+        print("multimodal_embeddings", multimodal_embeddings)
         return self.language_model(
             input_ids=None,
             positions=positions,
             input_metadata=input_metadata,
-            input_embeds=input_embeddings,
+            input_embeds=multimodal_embeddings,
         )
+    
+    def get_embedding_layer_from_file(self) -> nn.Module:
+        if self.embeddings_layer == None:
+            self.embeddings_layer = torch.load("weights/embedding_layer.pt", weights_only=False).to('cuda')
+        return self.embeddings_layer
 
     def predict_action(
         self,

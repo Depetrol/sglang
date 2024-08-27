@@ -334,7 +334,7 @@ class ModelTpServer:
                     (image_hash >> 64) % self.model_config.vocab_size,
                 ]
                 if "openvla" in self.model_config.path:
-                    req.pad_value = 2
+                    req.pad_value = -1
                 req.image_size = recv_req.image_size
                 (
                     req.origin_input_ids,

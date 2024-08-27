@@ -205,14 +205,10 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             self.config.text_config.vocab_size - self.config.pad_to_multiple_of
         )
 
-        print("===== Using OpenVLAForActionPrediction =====")
-
     def pad_input_ids(self, input_ids, pad_value, pt_shape=None, image_size=None):
-        print("===== pad_input_ids =====")
         return input_ids, [0]
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
-        print("===== Load Weights =====")
         return None
 
     def _init_weights(self, module: nn.Module) -> None:
@@ -247,7 +243,6 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         image_offsets: Optional[List[int]] = None,
     ) -> Union[Tuple, PrismaticCausalLMOutputWithPast]:
         """Run a forward pass through the VLM, returning a PrismaticCausalLMOutputWithPast instance."""
-        print("input_ids", input_ids)
         # Instantiate Placeholder for Projector Features
         projected_patch_embeddings = None
 
@@ -256,7 +251,6 @@ class OpenVLAForActionPrediction(PreTrainedModel):
 
         # === Handle Unimodal Forward ===
         if pixel_values is None:
-            print("[Unimodal generation]")
             assert (
                 input_ids is not None
             ), "Missing `input_ids` in language-only forward!"
@@ -269,7 +263,6 @@ class OpenVLAForActionPrediction(PreTrainedModel):
 
         # === Handle Multimodal Forward ===
         else:
-            print("[Multimodal generation]")
             # Visual Feature Extraction
             patch_features = self.vision_backbone(pixel_values)
 
@@ -399,7 +392,6 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         return self.norm_stats[unnorm_key]["action"]
 
     def tie_weights(self) -> None:
-        print("===== Tie Weights =====")
         return
         # self.language_model.tie_weights()  # Note: `Llama-2` and `Mistral` don't tie weights (no-op)
 

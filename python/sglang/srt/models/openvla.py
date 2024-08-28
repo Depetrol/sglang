@@ -1,7 +1,6 @@
 import logging
 from dataclasses import dataclass
-from functools import partial
-from typing import Any, Callable, ClassVar, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 import timm
@@ -10,17 +9,22 @@ import tokenizers
 import torch
 import torch.nn as nn
 import transformers
-from timm.models.vision_transformer import LayerScale
 from torch import nn
 from transformers import PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import ModelOutput
 from transformers.models.auto import CONFIG_MAPPING
 from vllm.config import CacheConfig
 from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
+from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from sglang.srt.layers.openvla_layers import PrismaticProjector, PrismaticVisionBackbone
 from sglang.srt.model_executor.forward_batch_info import InputMetadata
 from sglang.srt.models.llama2 import LlamaForCausalLM
+
+_KEYS_TO_MODIFY_MAPPING = {
+    "language_model.model": "model",
+    "language_model.lm_head": "lm_head",
+}
 
 TIMM_OVERRIDE_ACT_LAYER: Dict[str, List[Optional[str]]] = {
     "clip-vit-l": ["quick_gelu"],
@@ -216,7 +220,28 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         return input_ids, 1
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
-        return None
+        weights = list(weights)
+        new_weights = []
+        params_dict = dict(self.named_parameters())
+        for name, weight in weights:
+            if not "language_model" in name:
+                param = params_dict[name]
+                default_weight_loader(param, weight)
+                continue
+
+            new_name = None
+            for key_to_modify, new_key in _KEYS_TO_MODIFY_MAPPING.items():
+                if key_to_modify in name:
+                    new_name = name.replace(key_to_modify, new_key)
+
+            if new_name is not None:
+                new_weights.append((new_name, weight))
+            else:
+                new_weights.append((name, weight))
+
+        weights = new_weights
+
+        self.language_model.load_weights(weights)
 
     def _init_weights(self, module: nn.Module) -> None:
         # Important :: this HF ported version is *not* meant for training from scratch; only inference and fine-tuning!

@@ -295,9 +295,8 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             )
 
         # === Handle Multimodal Forward ===
-        # embedding_layer = self.language_model.model.embed_tokens 
+        embedding_layer = self.language_model.model.embed_tokens 
         unpadded_input_ids = input_ids[input_ids != -1].unsqueeze(0)
-        embedding_layer = self.get_embedding_layer_from_file()
         input_embeddings = embedding_layer(unpadded_input_ids)
         assert(len(pixel_values) ==1, "OpenVLA only supports one pixel values as input")
 
@@ -314,12 +313,6 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             input_metadata=input_metadata,
             input_embeds=multimodal_embeddings,
         )
-    
-    def get_embedding_layer_from_file(self) -> nn.Module:
-        if self.embeddings_layer == None:
-            from huggingface_hub import hf_hub_download
-            self.embeddings_layer = torch.load(hf_hub_download(repo_id="depetrol/openvla-7b", filename="embedding_layer.pt"), weights_only=False).to('cuda')
-        return self.embeddings_layer
 
     def predict_action(
         self,

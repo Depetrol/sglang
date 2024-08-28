@@ -16,6 +16,7 @@ def single():
         image_path="images/robot.jpg",
         question="In: What action should the robot take to {<INSTRUCTION>}?\nOut:",
         max_new_tokens=7,
+        temperature=0,
     )
     output_ids = state.get_meta_info("action")["output_ids"]
     return output_ids

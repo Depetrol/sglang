@@ -2,9 +2,11 @@
 Usage: python3 srt_example_llava.py
 """
 
-import sglang as sgl
 import numpy as np
 from transformers import AutoConfig
+
+import sglang as sgl
+
 
 @sgl.function
 def image_qa(s, image_path, question):
@@ -12,13 +14,15 @@ def image_qa(s, image_path, question):
     s += sgl.gen("action")
 
 
-class TokenToAction():
-    def __init__(self, n_action_bins:int=256, unnorm_key: str = "bridge_orig"):
+class TokenToAction:
+    def __init__(self, n_action_bins: int = 256, unnorm_key: str = "bridge_orig"):
         self.bins = np.linspace(-1, 1, n_action_bins)
         self.bin_centers = (self.bins[:-1] + self.bins[1:]) / 2.0
         self.vocab_size = 32000
         self.unnorm_key = unnorm_key
-        self.config = AutoConfig.from_pretrained("openvla/openvla-7b", trust_remote_code=True).to_dict()
+        self.config = AutoConfig.from_pretrained(
+            "openvla/openvla-7b", trust_remote_code=True
+        ).to_dict()
         self.norm_stats = self.config["norm_stats"]
         assert unnorm_key is not None
         if unnorm_key not in self.norm_stats:
@@ -50,7 +54,9 @@ class TokenToAction():
         )
         return actions
 
+
 converter = TokenToAction()
+
 
 def single():
     state = image_qa.run(

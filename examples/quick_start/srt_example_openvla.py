@@ -23,15 +23,19 @@ def single():
 
 
 def batch():
+    arguments = [
+        {
+            "image_path": "images/robot.jpg",
+            "question": "In: What action should the robot take to {<INSTRUCTION>}?\nOut:",
+        }
+    ] * 100
     states = image_qa.run_batch(
-        [
-            {"image_path": "images/robot.jpg", "question": "What is this?"},
-            {"image_path": "images/dog.jpeg", "question": "What is this?"},
-        ],
-        max_new_tokens=128,
+        arguments,
+        max_new_tokens=7,
+        temperature=0,
     )
     for s in states:
-        print(s["answer"], "\n")
+        print(s.get_meta_info("action")["output_ids"])
 
 
 if __name__ == "__main__":
@@ -40,8 +44,12 @@ if __name__ == "__main__":
         tokenizer_path="openvla/openvla-7b",
         disable_cuda_graph=True,
         disable_radix_cache=True,
+        chunked_prefill_size=-1,
     )
     sgl.set_default_backend(runtime)
     ouput_ids = single()
     print(ouput_ids)
+
+    batch()
+
     runtime.shutdown()

@@ -257,7 +257,7 @@ class ModelTpServer:
             # Run a decode batch
             if self.running_batch is not None:
                 # Run a few decode batches continuously for reducing overhead
-                for _ in range(global_config.num_continue_decode_steps):
+                for _ in range(1):
                     self.num_generated_tokens += len(self.running_batch.reqs)
                     self.forward_decode_batch(self.running_batch)
 
@@ -415,6 +415,7 @@ class ModelTpServer:
         for req in self.waiting_queue:
             req.init_next_round_input(None if prefix_computed else self.tree_cache)
             res = adder.add_one_req(req)
+
             if (
                 not res
                 or adder.no_remaining_tokens()

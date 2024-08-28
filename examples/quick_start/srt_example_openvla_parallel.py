@@ -32,9 +32,8 @@ if __name__ == "__main__":
     runtime = sgl.Runtime(
         model_path="openvla/openvla-7b",
         tokenizer_path="openvla/openvla-7b",
-        disable_cuda_graph=True,
         disable_radix_cache=True,
-        chunked_prefill_size=-1,
+        # enable_torch_compile=True,
     )
     sgl.set_default_backend(runtime)
     for i in tqdm(range(20)):

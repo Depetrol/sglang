@@ -336,19 +336,16 @@ class ModelTpServer:
                 if "openvla" in self.model_config.path:
                     req.pad_value = 2
                 req.image_size = recv_req.image_size
-                (
-                    req.origin_input_ids,
-                    req.image_offset,
-                ) = self.model_runner.model.pad_input_ids(
+                pad_res = self.model_runner.model.pad_input_ids(
                     req.origin_input_ids_unpadded,
                     req.pad_value,
                     req.pixel_values.shape,
                     req.image_size,
                 )
                 if "openvla" in self.model_config.path:
-                    req.image_size = len(req.origin_input_ids) - len(
-                        req.origin_input_ids_unpadded
-                    )
+                    req.origin_input_ids, req.image_offset, req.image_size = pad_res
+                else:
+                    req.origin_input_ids, req.image_offset = pad_res
 
             req.return_logprob = recv_req.return_logprob
             req.logprob_start_len = recv_req.logprob_start_len

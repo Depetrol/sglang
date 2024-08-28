@@ -214,7 +214,9 @@ class OpenVLAForActionPrediction(PreTrainedModel):
     ):
         image_pad_len = ((pt_shape[-1] - 1) // multiple_of + 1) * multiple_of
         input_ids = input_ids[:1] + [pad_value] * image_pad_len + input_ids[1:]
-        return input_ids, 1
+        if input_ids[-1] != 29871:
+            input_ids.append(29871)
+        return input_ids, 1, image_pad_len
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         weights = list(weights)

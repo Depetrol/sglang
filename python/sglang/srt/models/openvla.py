@@ -282,7 +282,7 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             [input_embeddings[:, :1, :], projected_patch_embeddings, input_embeddings[:, 1:, :]], dim=1
         )
         multimodal_embeddings = multimodal_embeddings.squeeze(0)
-        # print("multimodal_embeddings", multimodal_embeddings)
+        print("multimodal_embeddings", multimodal_embeddings)
         return self.language_model(
             input_ids=None,
             positions=positions,
@@ -292,7 +292,8 @@ class OpenVLAForActionPrediction(PreTrainedModel):
     
     def get_embedding_layer_from_file(self) -> nn.Module:
         if self.embeddings_layer == None:
-            self.embeddings_layer = torch.load("weights/embedding_layer.pt", weights_only=False).to('cuda')
+            from huggingface_hub import hf_hub_download
+            self.embeddings_layer = torch.load(hf_hub_download(repo_id="depetrol/openvla-7b", filename="embedding_layer.pt"), weights_only=False).to('cuda')
         return self.embeddings_layer
 
     def predict_action(

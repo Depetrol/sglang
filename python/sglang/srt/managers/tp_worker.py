@@ -87,6 +87,8 @@ class ModelTpServer:
         self.schedule_policy = server_args.schedule_policy
         self.disable_regex_jump_forward = server_args.disable_regex_jump_forward
 
+        self.is_last_round_prefill = False
+
         # Init model and tokenizer
         self.model_config = ModelConfig(
             server_args.model_path,
@@ -242,9 +244,12 @@ class ModelTpServer:
 
     @torch.inference_mode()
     def forward_step(self):
-        new_batch = self.get_new_prefill_batch()
+        new_batch = None
+        if not self.is_last_round_prefill:
+            new_batch = self.get_new_prefill_batch()
 
         if new_batch is not None:
+            self.is_last_round_prefill = True
             # Run a new prefill batch
             self.forward_prefill_batch(new_batch)
 
@@ -254,6 +259,7 @@ class ModelTpServer:
                 else:
                     self.running_batch.merge(new_batch)
         else:
+            self.is_last_round_prefill = False
             # Run a decode batch
             if self.running_batch is not None:
                 # Run a few decode batches continuously for reducing overhead
@@ -415,13 +421,7 @@ class ModelTpServer:
         for req in self.waiting_queue:
             req.init_next_round_input(None if prefix_computed else self.tree_cache)
             res = adder.add_one_req(req)
-
-            if (
-                not res
-                or adder.no_remaining_tokens()
-                or running_bs + len(adder.can_run_list) >= self.max_running_requests
-            ):
-                break
+            break
 
         can_run_list = adder.can_run_list
 

@@ -2,7 +2,7 @@
 Usage: python3 srt_example_llava.py
 """
 
-import multiprocessing
+import threading
 import time
 
 from tqdm import tqdm
@@ -16,6 +16,9 @@ def image_qa(s, image_path, question):
     s += sgl.gen("action")
 
 
+last_get_time = time.time()
+
+
 def single(i):
     t0 = time.time()
     state = image_qa.run(
@@ -25,7 +28,11 @@ def single(i):
         temperature=0,
     )
     output_ids = state.get_meta_info("action")["output_ids"]
-    print(f"Processs {i} in {time.time()-t0} at {time.time()} ")
+    global last_get_time
+    print(
+        f"Processs {i} in {time.time()-t0} at {time.time()}, FPS: {1/(time.time()-last_get_time)}"
+    )
+    last_get_time = time.time()
 
 
 if __name__ == "__main__":
@@ -38,11 +45,14 @@ if __name__ == "__main__":
     sgl.set_default_backend(runtime)
     for i in tqdm(range(20)):
         output_ids = single(0)
-    for i in tqdm(range(50)):
-        process = multiprocessing.Process(target=single, args=(i,))
-        process.start()
-        time.sleep(0.1)
-    process.join()
+    threads = []
+    for i in range(1000):
+        t = threading.Thread(target=single, args=(i,))
+        threads.append(t)
+        t.start()
+        time.sleep(0.05)
+
+    threads[-1].join()
     print("Complete")
 
     runtime.shutdown()

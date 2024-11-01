@@ -46,6 +46,7 @@ from sglang.srt.layers.fused_moe import FusedMoE
 from sglang.srt.layers.layernorm import RMSNorm
 from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.radix_attention import RadixAttention
+from sglang.srt.layers.sampler import Sampler
 from sglang.srt.model_executor.forward_batch_info import InputMetadata
 
 
@@ -295,12 +296,15 @@ class Grok1ModelForCausalLM(nn.Module):
         self.config = config
         self.quant_config = quant_config
         self.model = Grok1Model(config, quant_config=quant_config)
-        # self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
-        self.lm_head = ReplicatedLinear(config.hidden_size, config.vocab_size)
-        self.logits_processor = LogitsProcessor(config, skip_all_gather=True)
+        self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
+        self.logits_processor = LogitsProcessor(config)
+        self.sampler = Sampler()
 
         # Monkey patch _prepare_weights to load pre-sharded weights
         setattr(DefaultModelLoader, "_prepare_weights", _prepare_presharded_weights)
+
+        self.use_presharded_weights = True
+
         warnings.filterwarnings("ignore", category=FutureWarning)
 
     def forward(
@@ -311,9 +315,11 @@ class Grok1ModelForCausalLM(nn.Module):
         input_embeds: torch.Tensor = None,
     ) -> torch.Tensor:
         hidden_states = self.model(input_ids, positions, input_metadata, input_embeds)
-        return self.logits_processor(
+        logits_output = self.logits_processor(
             input_ids, hidden_states, self.lm_head.weight, input_metadata
         )
+        sample_output = self.sampler(logits_output, input_metadata.sampling_info)
+        return sample_output, logits_output
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         stacked_params_mapping = [
@@ -356,6 +362,13 @@ class Grok1ModelForCausalLM(nn.Module):
                         continue
                     name = name.replace(weight_name, param_name)
 
+                    if self.use_presharded_weights:
+                        extra_kwargs = {
+                            "use_presharded_weights": self.use_presharded_weights
+                        }
+                    else:
+                        extra_kwargs = {}
+
                     param = params_dict[name]
                     weight_loader = param.weight_loader
                     weight_loader(
@@ -364,7 +377,7 @@ class Grok1ModelForCausalLM(nn.Module):
                         weight_name,
                         shard_id=shard_id,
                         expert_id=expert_id,
-                        pre_sharded=get_tensor_model_parallel_world_size() > 1,
+                        **extra_kwargs,
                     )
                     break
                 else:

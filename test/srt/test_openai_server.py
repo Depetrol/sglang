@@ -8,7 +8,8 @@ from sglang.srt.hf_transformers_utils import get_tokenizer
 from sglang.srt.utils import kill_child_process
 from sglang.test.test_utils import (
     DEFAULT_MODEL_NAME_FOR_TEST,
-    DEFAULT_URL_FOR_UNIT_TEST,
+    DEFAULT_TIMEOUT_FOR_SERVER_LAUNCH,
+    DEFAULT_URL_FOR_TEST,
     popen_launch_server,
 )
 
@@ -17,10 +18,13 @@ class TestOpenAIServer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.model = DEFAULT_MODEL_NAME_FOR_TEST
-        cls.base_url = DEFAULT_URL_FOR_UNIT_TEST
+        cls.base_url = DEFAULT_URL_FOR_TEST
         cls.api_key = "sk-123456"
         cls.process = popen_launch_server(
-            cls.model, cls.base_url, timeout=300, api_key=cls.api_key
+            cls.model,
+            cls.base_url,
+            timeout=DEFAULT_TIMEOUT_FOR_SERVER_LAUNCH,
+            api_key=cls.api_key,
         )
         cls.base_url += "/v1"
         cls.tokenizer = get_tokenizer(DEFAULT_MODEL_NAME_FOR_TEST)
@@ -252,8 +256,7 @@ class TestOpenAIServer(unittest.TestCase):
                 index, True
             ), f"index {index} is not found in the response"
 
-    def run_batch(self, mode):
-        client = openai.Client(api_key=self.api_key, base_url=self.base_url)
+    def _create_batch(self, mode, client):
         if mode == "completion":
             input_file_path = "complete_input.jsonl"
             # write content to input file
@@ -329,9 +332,11 @@ class TestOpenAIServer(unittest.TestCase):
                     },
                 },
             ]
+
         with open(input_file_path, "w") as file:
             for line in content:
                 file.write(json.dumps(line) + "\n")
+
         with open(input_file_path, "rb") as file:
             uploaded_file = client.files.create(file=file, purpose="batch")
         if mode == "completion":
@@ -344,6 +349,13 @@ class TestOpenAIServer(unittest.TestCase):
             endpoint=endpoint,
             completion_window=completion_window,
         )
+
+        return batch_job, content, uploaded_file
+
+    def run_batch(self, mode):
+        client = openai.Client(api_key=self.api_key, base_url=self.base_url)
+        batch_job, content, uploaded_file = self._create_batch(mode=mode, client=client)
+
         while batch_job.status not in ["completed", "failed", "cancelled"]:
             time.sleep(3)
             print(
@@ -366,6 +378,29 @@ class TestOpenAIServer(unittest.TestCase):
             if line.strip() != ""
         ]
         assert len(results) == len(content)
+        for delete_fid in [uploaded_file.id, result_file_id]:
+            del_pesponse = client.files.delete(delete_fid)
+            assert del_pesponse.deleted
+
+    def run_cancel_batch(self, mode):
+        client = openai.Client(api_key=self.api_key, base_url=self.base_url)
+        batch_job, _, uploaded_file = self._create_batch(mode=mode, client=client)
+
+        assert batch_job.status not in ["cancelling", "cancelled"]
+
+        batch_job = client.batches.cancel(batch_id=batch_job.id)
+        assert batch_job.status == "cancelling"
+
+        while batch_job.status not in ["failed", "cancelled"]:
+            batch_job = client.batches.retrieve(batch_job.id)
+            print(
+                f"Batch job status: {batch_job.status}...trying again in 3 seconds..."
+            )
+            time.sleep(3)
+
+        assert batch_job.status == "cancelled"
+        del_response = client.files.delete(uploaded_file.id)
+        assert del_response.deleted
 
     def test_completion(self):
         for echo in [False, True]:
@@ -409,6 +444,10 @@ class TestOpenAIServer(unittest.TestCase):
     def test_batch(self):
         for mode in ["completion", "chat"]:
             self.run_batch(mode)
+
+    def test_calcel_batch(self):
+        for mode in ["completion", "chat"]:
+            self.run_cancel_batch(mode)
 
     def test_regex(self):
         client = openai.Client(api_key=self.api_key, base_url=self.base_url)

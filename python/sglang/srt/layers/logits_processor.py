@@ -29,7 +29,7 @@ from sglang.srt.model_executor.forward_batch_info import ForwardMode, InputMetad
 
 
 @dataclasses.dataclass
-class LogitProcessorOutput:
+class LogitsProcessorOutput:
     # The logits of the next tokens.       shape: [#seq, vocab_size]
     next_token_logits: torch.Tensor
     # The logprobs of the next tokens.     shape: [#seq, vocab_size]
@@ -180,12 +180,12 @@ class LogitsProcessor(nn.Module):
 
         if hasattr(self.config, "final_logit_softcapping"):
             last_logits.div_(self.config.final_logit_softcapping)
-            last_logits = torch.tanh(last_logits)
+            torch.tanh(last_logits, out=last_logits)
             last_logits.mul_(self.config.final_logit_softcapping)
 
         # Return only last_logits if logprob is not requested
         if not logits_metadata.return_logprob:
-            return LogitProcessorOutput(
+            return LogitsProcessorOutput(
                 next_token_logits=last_logits,
                 next_token_logprobs=None,
                 normalized_prompt_logprobs=None,
@@ -209,7 +209,7 @@ class LogitsProcessor(nn.Module):
                 else:
                     output_top_logprobs = None
 
-                return LogitProcessorOutput(
+                return LogitsProcessorOutput(
                     next_token_logits=last_logits,
                     next_token_logprobs=last_logprobs,
                     normalized_prompt_logprobs=None,
@@ -241,7 +241,7 @@ class LogitsProcessor(nn.Module):
 
                 if hasattr(self.config, "final_logit_softcapping"):
                     all_logits.div_(self.config.final_logit_softcapping)
-                    all_logits = torch.tanh(all_logits)
+                    torch.tanh(all_logits, out=all_logits)
                     all_logits.mul_(self.config.final_logit_softcapping)
 
                 all_logprobs = all_logits
@@ -278,7 +278,7 @@ class LogitsProcessor(nn.Module):
                 # Remove the last token logprob for the prefill tokens.
                 input_token_logprobs = input_token_logprobs[:-1]
 
-                return LogitProcessorOutput(
+                return LogitsProcessorOutput(
                     next_token_logits=last_logits,
                     next_token_logprobs=last_logprobs,
                     normalized_prompt_logprobs=normalized_prompt_logprobs,

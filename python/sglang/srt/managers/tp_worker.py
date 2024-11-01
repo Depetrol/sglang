@@ -31,7 +31,7 @@ from sglang.global_config import global_config
 from sglang.srt.constrained.fsm_cache import FSMCache
 from sglang.srt.constrained.jump_forward import JumpForwardCache
 from sglang.srt.hf_transformers_utils import get_processor, get_tokenizer
-from sglang.srt.layers.logits_processor import LogitProcessorOutput
+from sglang.srt.layers.logits_processor import LogitsProcessorOutput
 from sglang.srt.managers.io_struct import (
     AbortReq,
     BatchEmbeddingOut,
@@ -56,6 +56,7 @@ from sglang.srt.model_executor.forward_batch_info import ForwardMode
 from sglang.srt.model_executor.model_runner import ModelRunner
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils import (
+    configure_logger,
     is_multimodal_model,
     set_random_seed,
     suppress_other_loggers,
@@ -94,6 +95,7 @@ class ModelTpServer:
             context_length=server_args.context_length,
             model_overide_args=model_overide_args,
         )
+
         self.model_runner = ModelRunner(
             model_config=self.model_config,
             mem_fraction_static=server_args.mem_fraction_static,
@@ -144,7 +146,6 @@ class ModelTpServer:
 
         # Print info
         logger.info(
-            f"[gpu={self.gpu_id}] "
             f"max_total_num_tokens={self.max_total_num_tokens}, "
             f"max_prefill_tokens={self.max_prefill_tokens}, "
             f"max_running_requests={self.max_running_requests}, "
@@ -196,6 +197,16 @@ class ModelTpServer:
                     "trust_remote_code": server_args.trust_remote_code,
                 },
                 skip_tokenizer_init=server_args.skip_tokenizer_init,
+                json_schema_mode=False,
+            )
+            self.json_fsm_cache = FSMCache(
+                server_args.tokenizer_path,
+                {
+                    "tokenizer_mode": server_args.tokenizer_mode,
+                    "trust_remote_code": server_args.trust_remote_code,
+                },
+                skip_tokenizer_init=server_args.skip_tokenizer_init,
+                json_schema_mode=True,
             )
         self.jump_forward_cache = JumpForwardCache()
 
@@ -283,7 +294,7 @@ class ModelTpServer:
         self.num_generated_tokens = 0
         self.last_stats_tic = time.time()
         logger.info(
-            f"[gpu={self.gpu_id}] Decode batch. "
+            f"Decode batch. "
             f"#running-req: {len(self.running_batch.reqs)}, "
             f"#token: {num_used}, "
             f"token usage: {num_used / self.max_total_num_tokens:.2f}, "
@@ -352,8 +363,17 @@ class ModelTpServer:
             req.top_logprobs_num = recv_req.top_logprobs_num
             req.stream = recv_req.stream
 
+            # Init regex fsm fron json
+            if req.sampling_params.json_schema is not None:
+                req.regex_fsm, computed_regex_string = self.json_fsm_cache.query(
+                    req.sampling_params.json_schema
+                )
+                if not self.disable_regex_jump_forward:
+                    req.jump_forward_map = self.jump_forward_cache.query(
+                        computed_regex_string
+                    )
             # Init regex fsm
-            if req.sampling_params.regex is not None:
+            elif req.sampling_params.regex is not None:
                 req.regex_fsm = self.regex_fsm_cache.query(req.sampling_params.regex)
                 if not self.disable_regex_jump_forward:
                     req.jump_forward_map = self.jump_forward_cache.query(
@@ -447,7 +467,7 @@ class ModelTpServer:
 
             if num_mixed_running > 0:
                 logger.info(
-                    f"[gpu={self.gpu_id}] Prefill batch"
+                    f"Prefill batch"
                     f"(mixed #running-req: {num_mixed_running}). "
                     f"#new-seq: {len(can_run_list)}, "
                     f"#new-token: {adder.log_input_tokens}, "
@@ -457,7 +477,7 @@ class ModelTpServer:
                 )
             else:
                 logger.info(
-                    f"[gpu={self.gpu_id}] Prefill batch. "
+                    f"Prefill batch. "
                     f"#new-seq: {len(can_run_list)}, "
                     f"#new-token: {adder.log_input_tokens}, "
                     f"#cached-token: {adder.log_hit_tokens}, "
@@ -490,21 +510,29 @@ class ModelTpServer:
         if self.model_runner.is_generation:
             # Forward and sample the next tokens
             if batch.extend_num_tokens != 0:
-                output = self.model_runner.forward(batch, ForwardMode.EXTEND)
-                next_token_ids = batch.sample(output.next_token_logits)
+                sample_output, logits_output = self.model_runner.forward(
+                    batch, ForwardMode.EXTEND
+                )
+                next_token_ids = batch.check_sample_results(sample_output)
                 batch.sampling_info.penalizer_orchestrator.cumulate_output_tokens(
                     next_token_ids
                 )
 
                 # Move logprobs to cpu
-                if output.next_token_logprobs is not None:
-                    output.next_token_logprobs = output.next_token_logprobs[
-                        torch.arange(len(next_token_ids), device=next_token_ids.device),
-                        next_token_ids,
-                    ].tolist()
-                    output.input_token_logprobs = output.input_token_logprobs.tolist()
-                    output.normalized_prompt_logprobs = (
-                        output.normalized_prompt_logprobs.tolist()
+                if logits_output.next_token_logprobs is not None:
+                    logits_output.next_token_logprobs = (
+                        logits_output.next_token_logprobs[
+                            torch.arange(
+                                len(next_token_ids), device=next_token_ids.device
+                            ),
+                            next_token_ids,
+                        ].tolist()
+                    )
+                    logits_output.input_token_logprobs = (
+                        logits_output.input_token_logprobs.tolist()
+                    )
+                    logits_output.normalized_prompt_logprobs = (
+                        logits_output.normalized_prompt_logprobs.tolist()
                     )
 
                 next_token_ids = next_token_ids.tolist()
@@ -543,12 +571,14 @@ class ModelTpServer:
                     self.req_to_token_pool.free(req.req_pool_idx)
 
                 if req.return_logprob:
-                    self.add_logprob_return_values(i, req, pt, next_token_ids, output)
+                    self.add_logprob_return_values(
+                        i, req, pt, next_token_ids, logits_output
+                    )
                     pt += req.extend_input_len
         else:
             assert batch.extend_num_tokens != 0
-            output = self.model_runner.forward(batch, ForwardMode.EXTEND)
-            embeddings = output.embeddings.tolist()
+            logits_output = self.model_runner.forward(batch, ForwardMode.EXTEND)
+            embeddings = logits_output.embeddings.tolist()
 
             # Check finish conditions
             for i, req in enumerate(batch.reqs):
@@ -576,7 +606,7 @@ class ModelTpServer:
         req: Req,
         pt: int,
         next_token_ids: List[int],
-        output: LogitProcessorOutput,
+        output: LogitsProcessorOutput,
     ):
         if req.normalized_prompt_logprob is None:
             req.normalized_prompt_logprob = output.normalized_prompt_logprobs[i]
@@ -635,7 +665,7 @@ class ModelTpServer:
             self.new_token_ratio = new_token_ratio
 
             logger.info(
-                "decode out of memory happened, "
+                "Decode out of memory happened. "
                 f"#retracted_reqs: {len(retracted_reqs)}, "
                 f"#new_token_ratio: {old_ratio:.4f} -> {self.new_token_ratio:.4f}"
             )
@@ -658,15 +688,17 @@ class ModelTpServer:
         batch.prepare_for_decode()
 
         # Forward and sample the next tokens
-        output = self.model_runner.forward(batch, ForwardMode.DECODE)
-        next_token_ids = batch.sample(output.next_token_logits)
+        sample_output, logits_output = self.model_runner.forward(
+            batch, ForwardMode.DECODE
+        )
+        next_token_ids = batch.check_sample_results(sample_output)
         batch.sampling_info.penalizer_orchestrator.cumulate_output_tokens(
             next_token_ids
         )
 
         # Move logprobs to cpu
-        if output.next_token_logprobs is not None:
-            next_token_logprobs = output.next_token_logprobs[
+        if logits_output.next_token_logprobs is not None:
+            next_token_logprobs = logits_output.next_token_logprobs[
                 torch.arange(len(next_token_ids), device=next_token_ids.device),
                 next_token_ids,
             ].tolist()
@@ -692,7 +724,7 @@ class ModelTpServer:
                     (next_token_logprobs[i], next_token_id)
                 )
                 if req.top_logprobs_num > 0:
-                    req.output_top_logprobs.append(output.output_top_logprobs[i])
+                    req.output_top_logprobs.append(logits_output.output_top_logprobs[i])
 
         self.handle_finished_requests(batch)
 
@@ -853,7 +885,9 @@ def run_tp_server(
     nccl_port: int,
     model_overide_args: dict,
 ):
-    """Run a tensor parallel server."""
+    """Run a tensor parallel model server."""
+    configure_logger(server_args, prefix=f" TP{tp_rank}")
+
     try:
         model_server = ModelTpServer(
             gpu_id,

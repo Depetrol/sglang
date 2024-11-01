@@ -1,6 +1,8 @@
-import sglang as sgl
-from transformers import AutoConfig
 import numpy as np
+from transformers import AutoConfig
+
+import sglang as sgl
+
 
 class TokenToAction:
     def __init__(self, n_action_bins: int = 256, unnorm_key: str = "bridge_orig"):
@@ -41,7 +43,7 @@ class TokenToAction:
             normalized_actions,
         )
         return actions
-    
+
 
 @sgl.function
 def image_qa(s, image_path, question):

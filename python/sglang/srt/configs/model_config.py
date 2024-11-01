@@ -92,6 +92,12 @@ class ModelConfig:
             self.attention_arch = AttentionArch.MLA
             self.kv_lora_rank = self.hf_config.kv_lora_rank
             self.qk_rope_head_dim = self.hf_config.qk_rope_head_dim
+        elif "OpenVLAForActionPrediction" in self.hf_config.architectures:
+            self.attention_arch = AttentionArch.MHA
+            self.hf_config.hidden_size = 4096
+            self.hf_config.num_attention_heads = 32
+            self.hf_config.num_hidden_layers = 32
+            self.hf_config.vocab_size = 32064
         else:
             self.attention_arch = AttentionArch.MHA
 

@@ -212,6 +212,7 @@ def is_multimodal_model(model_architectures):
         or "LlavaVidForCausalLM" in model_architectures
         or "MllamaForConditionalGeneration" in model_architectures
         or "Qwen2VLForConditionalGeneration" in model_architectures
+        or "OpenVLAForActionPrediction" in model_architectures
     ):
         return True
     else:

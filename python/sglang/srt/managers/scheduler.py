@@ -1040,8 +1040,8 @@ class Scheduler:
                     read_ids, read_offset = req.init_incremental_detokenize()
                     output_read_ids.append(read_ids)
                     output_read_offsets.append(read_offset)
-                    if self.skip_tokenizer_init:
-                        output_ids.append(req.output_ids)
+                    # if self.skip_tokenizer_init:
+                    output_ids.append(req.output_ids)
                     output_skip_special_tokens.append(
                         req.sampling_params.skip_special_tokens
                     )
@@ -1055,6 +1055,7 @@ class Scheduler:
                         "completion_tokens": len(req.output_ids),
                         "completion_tokens_wo_jump_forward": req.completion_tokens_wo_jump_forward,
                         "cached_tokens": req.cached_tokens,
+                        "output_ids": output_ids,
                         "finish_reason": (
                             req.finished_reason.to_json()
                             if req.finished_reason is not None

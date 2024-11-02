@@ -65,7 +65,7 @@ def single():
         max_new_tokens=7,
         temperature=0,
     )
-    output_ids = state.get_var("action")
+    output_ids = state.get_meta_info("action")["output_ids"]
     print(output_ids)
     # assert output_ids == [31888,31869,31900,31912,31823,31882,31744]
     action = converter.convert(output_ids)

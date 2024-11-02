@@ -351,7 +351,6 @@ class OpenVLAImageProcessor(BaseImageProcessor):
     async def process_images_async(self, image_data, input_text, request_obj):
         if not image_data:
             return None
-        print("OpenVLAImageProcessor.process_images_async")
         request_obj, model_path = request_obj
         image_data, image_size = load_image(image_data)
         image_data = image_data.resize((224, 224))

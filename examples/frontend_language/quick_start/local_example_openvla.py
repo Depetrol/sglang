@@ -67,11 +67,10 @@ def single():
     )
     output_ids = state.get_meta_info("action")["output_ids"]
     print(output_ids)
-    # assert output_ids == [31888,31869,31900,31912,31823,31882,31744]
+    assert output_ids == [[31888,31869,31900,31912,31823,31882,31744]]
     action = converter.convert(output_ids)
-    # assert np.array_equal(np.round(action, 5), np.round([-3.78757518e-03,5.47156949e-04,-2.41243806e-04,-2.50440557e-02,2.53441257e-02,-1.77964902e-02,9.96078431e-01], 5))
+    assert np.array_equal(np.round(action, 5), np.round([[-3.78757518e-03,5.47156949e-04,-2.41243806e-04,-2.50440557e-02,2.53441257e-02,-1.77964902e-02,9.96078431e-01]], 5))
     return action
-
 
 def batch():
     arguments = [

@@ -225,7 +225,9 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         # image_sizes: Optional[List[List[int]]] = None,
         # image_offsets: Optional[List[int]] = None,
     ):
-        need_vision = forward_batch.image_inputs and len(forward_batch.image_inputs) > 0 and forward_batch.image_inputs[0] is not None
+        need_vision = forward_batch.image_inputs is not None and any(
+            p is not None for p in forward_batch.image_inputs
+        ) and forward_batch.extend_seq_lens_cpu is not None
         # === Handle Unimodal Forward ===
         if not need_vision or len(positions) == 1:
             assert (
@@ -241,7 +243,19 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         # === Handle Multimodal Forward ===
         embedding_layer = self.language_model.model.embed_tokens
         input_embeddings = embedding_layer(input_ids)
-        assert len(forward_batch.image_inputs) == 1, "Only single image inputs supported in OpenVLA"
+        pt = 0
+        # assert len(forward_batch.image_inputs) == 1, "Only single image inputs supported in OpenVLA"
+        for i, image_input in enumerate(forward_batch.image_inputs):
+            image_offset = 1
+            image_size = 256
+            pixel_value = self.processor.process_image(image_input.pixel_values).to(torch.bfloat16).to(0)
+            patch_features = self.vision_backbone(pixel_value)
+            projected_patch_embeddings = self.projector(patch_features)
+            input_embeddings[pt + image_offset : pt + image_offset + image_size] = (
+                projected_patch_embeddings
+            )
+            pt += forward_batch.extend_seq_lens_cpu[i]
+
         image_data = forward_batch.image_inputs[0]
         pixel_value = image_data.pixel_values
         pixel_value = self.processor.process_image(pixel_value).to(torch.bfloat16).to(0)
@@ -258,6 +272,5 @@ class OpenVLAForActionPrediction(PreTrainedModel):
             forward_batch=forward_batch,
             input_embeds=input_embeddings,
         )
-
 
 EntryClass = OpenVLAForActionPrediction

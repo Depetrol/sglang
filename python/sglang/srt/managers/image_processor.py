@@ -355,7 +355,6 @@ class OpenVLAImageProcessor(BaseImageProcessor):
         image_data, image_size = load_image(image_data)
         image_data = image_data.resize((224, 224))
 
-        print("model_path",model_path)
         assert not isinstance(image_data, list), "OpenVLA only supports single image processing"
         return {
             "pixel_values": image_data,

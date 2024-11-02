@@ -204,7 +204,7 @@ class TokenizerManager:
                 sampling_params = self._get_sampling_params(obj.sampling_params)
                 if self.is_generation:
                     image_inputs = await self.image_processor.process_images_async(
-                        obj.image_data, input_text or input_ids, obj
+                        obj.image_data, input_text or input_ids, (obj, self.model_path)
                     )
                     if image_inputs and "input_ids" in image_inputs:
                         input_ids = image_inputs["input_ids"]

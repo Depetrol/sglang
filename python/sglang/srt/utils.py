@@ -336,7 +336,6 @@ def decode_video_base64(video_base64):
 
 def load_image(image_file: Union[str, bytes]):
     from PIL import Image
-
     image = image_size = None
 
     if isinstance(image_file, bytes):

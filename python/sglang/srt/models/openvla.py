@@ -18,7 +18,7 @@ from vllm.config import CacheConfig
 from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
-from sglang.srt.layers.openvla import PrismaticProjector, PrismaticVisionBackbone
+from sglang.srt.layers.openvla import PrismaticProjector, PrismaticVisionBackbone, PrismaticProcessor
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.models.llama import LlamaForCausalLM
 
@@ -181,22 +181,13 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         )
 
     def pad_input_ids(self, input_ids: List[int], image_inputs: ImageInputs):
-        multiple_of=6
+        multiple_of=64
         pad_value = 2
         image_pad_len = ((224 - 1) // multiple_of + 1) * multiple_of
         input_ids = input_ids[:1] + [pad_value] * image_pad_len + input_ids[1:]
         if input_ids[-1] != 29871:
             input_ids.append(29871)
-        print("input_ids", input_ids)
         return input_ids
-    # def pad_input_ids(
-    #     self, input_ids, pad_value, pt_shape=None, image_size=None, multiple_of=64
-    # ):
-    #     image_pad_len = ((pt_shape[-1] - 1) // multiple_of + 1) * multiple_of
-    #     input_ids = input_ids[:1] + [pad_value] * image_pad_len + input_ids[1:]
-    #     if input_ids[-1] != 29871:
-    #         input_ids.append(29871)
-    #     return input_ids, 1, image_pad_len
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         weights = list(weights)
@@ -221,6 +212,9 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         weights = new_weights
 
         self.language_model.load_weights(weights)
+        self.processor = PrismaticProcessor.from_pretrained(
+                "openvla/openvla-7b", trust_remote_code=True
+            )
 
     def forward(
         self,
@@ -231,10 +225,9 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         # image_sizes: Optional[List[List[int]]] = None,
         # image_offsets: Optional[List[int]] = None,
     ):
-        need_vision = forward_batch.image_inputs is not None and len(forward_batch.image_inputs) > 0
-
+        need_vision = forward_batch.image_inputs and len(forward_batch.image_inputs) > 0 and forward_batch.image_inputs[0] is not None
         # === Handle Unimodal Forward ===
-        if not need_vision:
+        if not need_vision or len(positions) == 1:
             assert (
                 input_ids is not None
             ), "Missing `input_ids` in language-only forward!"
@@ -248,18 +241,17 @@ class OpenVLAForActionPrediction(PreTrainedModel):
         # === Handle Multimodal Forward ===
         embedding_layer = self.language_model.model.embed_tokens
         input_embeddings = embedding_layer(input_ids)
-        pixel_values = forward_batch.image_inputs[0].pixel_values
-        pt = 0
-        for i, p_v in enumerate(pixel_values):
-            image_offset = forward_batch.image_inputs[0].image_offsets[i]
-            image_size = forward_batch.image_inputs[0].image_sizes[i]
-            patch_features = self.vision_backbone(p_v)
-            projected_patch_embeddings = self.projector(patch_features)
-            input_embeddings[pt + image_offset : pt + image_offset + image_size] = (
-                projected_patch_embeddings
-            )
-            pt += forward_batch.extend_seq_lens_cpu[i]
-        print("input_embeddings", input_embeddings)
+        assert len(forward_batch.image_inputs) == 1, "Only single image inputs supported in OpenVLA"
+        image_data = forward_batch.image_inputs[0]
+        pixel_value = image_data.pixel_values
+        pixel_value = self.processor.process_image(pixel_value).to(torch.bfloat16).to(0)
+        
+
+        patch_features = self.vision_backbone(pixel_value)
+        projected_patch_embeddings = self.projector(patch_features)
+        input_embeddings[1 :257] = (
+            projected_patch_embeddings
+        )
         return self.language_model(
             input_ids=None,
             positions=positions,

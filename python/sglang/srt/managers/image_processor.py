@@ -11,12 +11,14 @@ import numpy as np
 import transformers
 from decord import VideoReader, cpu
 from PIL import Image
+import torch
 
 from sglang.srt.hf_transformers_utils import get_processor
 from sglang.srt.mm_utils import expand2square, process_anyres_image
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils import load_image
 from sglang.utils import get_exception_traceback
+from sglang.srt.layers.openvla import PrismaticProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -377,6 +379,21 @@ class MiniCPMVImageProcessor(BaseImageProcessor):
             "slice_end_id": slice_end_id,
         }
 
+class OpenVLAImageProcessor(BaseImageProcessor):
+    async def process_images_async(self, image_data, input_text, request_obj):
+        if not image_data:
+            return None
+        request_obj, model_path = request_obj
+        image_data, image_size = load_image(image_data)
+        image_data = image_data.resize((224, 224))
+
+        assert not isinstance(image_data, list), "OpenVLA only supports single image processing"
+        return {
+            "pixel_values": image_data,
+            "image_hashes": [hash(str(image_data))],
+            "image_sizes": (224, 224),
+            "modalities": request_obj.modalities,
+        }
 
 class Qwen2VLImageProcessor(BaseImageProcessor):
     def __init__(self, hf_config, server_args, _image_processor):
@@ -506,6 +523,8 @@ def get_image_processor(
         return Qwen2VLImageProcessor(hf_config, server_args, processor.image_processor)
     elif "MiniCPMV" in hf_config.architectures:
         return MiniCPMVImageProcessor(hf_config, server_args, processor)
+    elif "OpenVLAForActionPrediction" in hf_config.architectures:
+        return OpenVLAImageProcessor(hf_config, server_args, processor.image_processor)
     else:
         return LlavaImageProcessor(hf_config, server_args, processor.image_processor)
 

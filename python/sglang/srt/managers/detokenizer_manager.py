@@ -111,7 +111,8 @@ class DetokenizerManager:
 
         while True:
             recv_obj = self.recv_from_scheduler.recv_pyobj()
-
+            self.send_to_tokenizer.send_pyobj(recv_obj)
+            continue
             if isinstance(recv_obj, BatchEmbeddingOut):
                 # If it is embedding model, no detokenization is needed.
                 self.send_to_tokenizer.send_pyobj(recv_obj)

@@ -799,8 +799,10 @@ class TokenizerManager:
                     "meta_info": meta_info,
                 }
             elif isinstance(recv_obj, BatchTokenIDOut):
+                meta_info.update({"output_ids": recv_obj.decode_ids[i][recv_obj.read_offsets[i]:]})
                 out_dict = {
-                    "token_ids": recv_obj.output_ids[i],
+                    "text": "",
+                    "token_ids": recv_obj.decode_ids[i][recv_obj.read_offsets[i]:],
                     "meta_info": meta_info,
                 }
             else:
